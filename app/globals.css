@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(201, 143, 93, 0.24), transparent 35%),
+    radial-gradient(circle at bottom right, rgba(38, 69, 61, 0.18), transparent 28%),
+    #f8f2e8;
+}
+
+body {
+  min-height: 100vh;
+  color: #1c1d1f;
+  font-family:
+    "Avenir Next",
+    "Segoe UI",
+    "Helvetica Neue",
+    sans-serif;
+  background:
+    linear-gradient(180deg, rgba(251, 248, 242, 0.7) 0%, rgba(248, 242, 232, 0.96) 100%);
+}
+
+* {
+  border-color: rgba(28, 29, 31, 0.08);
+}
+
+::selection {
+  background: rgba(201, 143, 93, 0.28);
+}
+
+.grid-paper {
+  background-image:
+    linear-gradient(rgba(28, 29, 31, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(28, 29, 31, 0.04) 1px, transparent 1px);
+  background-size: 26px 26px;
+}
+
+.card-surface {
+  background: rgba(251, 248, 242, 0.82);
+  backdrop-filter: blur(14px);
+}
+
+.conversation-fade {
+  animation: conversation-fade 360ms ease-out;
+}
+
+@keyframes conversation-fade {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
