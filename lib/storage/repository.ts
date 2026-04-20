@@ -9,6 +9,8 @@ import {
 export interface StorageAdapter {
   readDataset(): Promise<ResearchDataset>;
   writeDataset(dataset: ResearchDataset): Promise<void>;
+  getSessionById?(sessionId: string): Promise<InterviewSession | null>;
+  upsertSession?(session: InterviewSession): Promise<InterviewSession>;
 }
 
 export async function getDataset(adapter: StorageAdapter) {
@@ -24,6 +26,10 @@ export async function getSessionById(
   adapter: StorageAdapter,
   sessionId: string,
 ): Promise<InterviewSession | null> {
+  if (adapter.getSessionById) {
+    return adapter.getSessionById(sessionId);
+  }
+
   const dataset = await getDataset(adapter);
   return dataset.sessions.find((session) => session.sessionId === sessionId) ?? null;
 }
@@ -32,6 +38,10 @@ export async function upsertSession(
   adapter: StorageAdapter,
   session: InterviewSession,
 ): Promise<InterviewSession> {
+  if (adapter.upsertSession) {
+    return adapter.upsertSession(session);
+  }
+
   const dataset = await getDataset(adapter);
   const validatedSession = InterviewSessionSchema.parse(session);
   const existingIndex = dataset.sessions.findIndex(
@@ -50,4 +60,3 @@ export async function upsertSession(
   await adapter.writeDataset(dataset);
   return validatedSession;
 }
-
