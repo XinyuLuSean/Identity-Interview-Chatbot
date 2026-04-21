@@ -49,6 +49,7 @@ type SubmitResponse = {
 
 type LocalAction =
   | { action: "ack_intro" }
+  | { action: "quit_intro" }
   | { action: "set_eligibility"; eligible: boolean }
   | { action: "request_clarification" }
   | { action: "submit_identity_response"; response: string }
@@ -65,6 +66,7 @@ type ParticipantCopy = {
   chooseEnglishDescription: string;
   chooseSpanishDescription: string;
   continue: string;
+  exitInterview: string;
   yesEligible: string;
   noEligible: string;
   clarify: string;
@@ -122,6 +124,7 @@ const PARTICIPANT_COPY: Record<LanguageCode, ParticipantCopy> = {
     chooseEnglishDescription: "Start the interview in English.",
     chooseSpanishDescription: "Comience la entrevista en español.",
     continue: "Continue",
+    exitInterview: "Exit interview",
     yesEligible: "Yes",
     noEligible: "No",
     clarify: "I need clarification",
@@ -190,6 +193,7 @@ const PARTICIPANT_COPY: Record<LanguageCode, ParticipantCopy> = {
     chooseEnglishDescription: "Start the interview in English.",
     chooseSpanishDescription: "Comience la entrevista en español.",
     continue: "Continuar",
+    exitInterview: "Salir de la entrevista",
     yesEligible: "Sí",
     noEligible: "No",
     clarify: "Necesito una aclaración",
@@ -639,15 +643,25 @@ function StepInput({
   switch (session.currentStep) {
     case "intro":
       return (
-        <button
-          className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-ink/90 disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={busy}
-          onClick={() => onSubmit({ action: "ack_intro" })}
-          type="button"
-        >
-          {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}
-          {busy ? copy.waiting : copy.continue}
-        </button>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <button
+            className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-ink/90 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={busy}
+            onClick={() => onSubmit({ action: "ack_intro" })}
+            type="button"
+          >
+            {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}
+            {busy ? copy.waiting : copy.continue}
+          </button>
+          <button
+            className="inline-flex w-full items-center justify-center rounded-full border border-ink/10 bg-white px-5 py-3 text-sm font-medium text-ink transition hover:border-ink/20 hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={busy}
+            onClick={() => onSubmit({ action: "quit_intro" })}
+            type="button"
+          >
+            {copy.exitInterview}
+          </button>
+        </div>
       );
     case "eligibility":
       return (
@@ -958,37 +972,10 @@ export function InterviewShell() {
   const activeLanguage: LanguageCode = session?.languageCode ?? "en";
   const copy = PARTICIPANT_COPY[activeLanguage];
 
-  const currentPrompt = useMemo(
-    () =>
-      [...(session?.transcript ?? [])]
-        .reverse()
-        .find((message) => message.role === "system")?.content ?? "",
-    [session],
-  );
-
   const isFinished =
     session?.currentStep === "completed" || session?.currentStep === "terminated_ineligible";
 
-  const conversationMessages = useMemo(() => {
-    const transcript = session?.transcript ?? [];
-    if (
-      session?.currentStep === "completed" ||
-      session?.currentStep === "terminated_ineligible"
-    ) {
-      return transcript;
-    }
-
-    const latestSystemIndex = [...transcript]
-      .reverse()
-      .findIndex((message) => message.role === "system");
-
-    if (latestSystemIndex === -1) {
-      return transcript;
-    }
-
-    const absoluteIndex = transcript.length - 1 - latestSystemIndex;
-    return transcript.filter((_, index) => index !== absoluteIndex);
-  }, [session]);
+  const conversationMessages = useMemo(() => session?.transcript ?? [], [session]);
 
   async function finalizeSession(nextSession: InterviewSession) {
     setIsSubmitting(true);
@@ -1051,6 +1038,10 @@ export function InterviewShell() {
         updateStep(next, getNextStep(next.currentStep));
         appendTranscript(next, "system", prompts.eligibility);
         setSession(next);
+        return;
+      }
+      case "quit_intro": {
+        resetInterview();
         return;
       }
       case "set_eligibility": {
@@ -1237,15 +1228,6 @@ export function InterviewShell() {
             </div>
             <ProgressBadge copy={copy} step={session.currentStep} />
           </div>
-
-          {!isFinished ? (
-            <div className="mt-6 rounded-[1.8rem] border border-ink/10 bg-white/80 p-5">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.22em] text-ink/45">
-                {copy.currentQuestion}
-              </div>
-              <p className="whitespace-pre-wrap text-sm leading-7 text-ink/80">{currentPrompt}</p>
-            </div>
-          ) : null}
 
           {conversationMessages.length > 0 ? (
             <div className="mt-6">
