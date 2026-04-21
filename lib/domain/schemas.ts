@@ -150,11 +150,26 @@ export const MetadataInputSchema = z.object({
   interviewLanguage: z.enum(INTERVIEW_LANGUAGES),
 });
 
+export const InterviewSubmissionSchema = z.object({
+  sessionId: z.string().min(1),
+  subjectId: z.string().min(1),
+  languageCode: LanguageCodeSchema,
+  eligibilityResult: z.enum(["eligible", "ineligible"]),
+  clarificationUsed: z.boolean(),
+  identityResponse: z.string().nullable(),
+  rankedSourcesRawInput: z.string().nullable(),
+  rankedSourcesDraft: z.array(RankedSourceSchema),
+  parserConfidence: z.number().min(0).max(1).nullable(),
+  parserWarnings: z.array(z.string()),
+  metadata: MetadataInputSchema.nullable(),
+});
+
 export type CodingCategory = z.infer<typeof CodingCategorySchema>;
 export type CodingRecord = z.infer<typeof CodingRecordSchema>;
 export type DemographicsInput = z.infer<typeof DemographicsInputSchema>;
 export type FollowUpReason = z.infer<typeof FollowUpReasonSchema>;
 export type InterviewSession = z.infer<typeof InterviewSessionSchema>;
+export type InterviewSubmission = z.infer<typeof InterviewSubmissionSchema>;
 export type LanguageCode = z.infer<typeof LanguageCodeSchema>;
 export type MetadataInput = z.infer<typeof MetadataInputSchema>;
 export type ParticipantKey = z.infer<typeof ParticipantKeySchema>;

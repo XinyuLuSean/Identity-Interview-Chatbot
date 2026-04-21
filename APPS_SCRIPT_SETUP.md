@@ -20,11 +20,14 @@ Set these in `.env.local`:
 STORAGE_BACKEND=apps_script
 GOOGLE_APPS_SCRIPT_URL=https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec
 GOOGLE_APPS_SCRIPT_SECRET=choose-a-random-secret
+APP_SESSION_SECRET=choose-a-second-random-secret
 OPENAI_API_KEY=your_openai_key
 RESEARCHER_ACCESS_CODE=choose-a-code
 ```
 
 `GOOGLE_SHEETS_ID`, `GOOGLE_SERVICE_ACCOUNT_EMAIL`, and `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` are not needed when using `apps_script`.
+
+`APP_SESSION_SECRET` is required in production. It signs the participant interview cookie and the researcher access cookie, so it should be a long random string that is different from `GOOGLE_APPS_SCRIPT_SECRET`.
 
 ## Required sheet tabs
 

@@ -15,6 +15,7 @@ This implementation is intentionally built as a **deterministic interview workfl
 - Weighted summary calculations for the six coding categories
 - Optional Google Sheets persistence adapter
 - Optional OpenAI-assisted ranked-source parsing and category suggestions
+- Signed participant/researcher cookies with lightweight API rate limiting
 
 ## Stack
 
@@ -66,12 +67,15 @@ Key variables:
 - `STORAGE_BACKEND=apps_script` to use a bound Google Apps Script web app
 - `STORAGE_BACKEND=google` to use the Google Sheets adapter
 - `OPENAI_API_KEY` to enable AI parsing/coding suggestions
+- `APP_SESSION_SECRET` to sign interview-session and researcher-auth cookies
 - `GOOGLE_SHEETS_ID` for the destination Google Sheet
 - `GOOGLE_SERVICE_ACCOUNT_EMAIL` for the service account that can edit the sheet
 - `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` for that service account
 - `GOOGLE_APPS_SCRIPT_URL` for the deployed Apps Script web app
 - `GOOGLE_APPS_SCRIPT_SECRET` for the shared secret between the app and Apps Script
 - `RESEARCHER_ACCESS_CODE` to protect the researcher dashboard
+
+For production, set a long random `APP_SESSION_SECRET` and a strong `RESEARCHER_ACCESS_CODE`. The app no longer uses any built-in demo researcher code.
 
 Enter these values in `.env.local` during local development, or in the Vercel project environment settings in deployment.
 

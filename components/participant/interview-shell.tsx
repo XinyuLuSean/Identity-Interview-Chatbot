@@ -47,6 +47,10 @@ type SubmitResponse = {
   session: InterviewSession;
 };
 
+type StartInterviewResponse = {
+  session: InterviewSession;
+};
+
 type LocalAction =
   | { action: "ack_intro" }
   | { action: "quit_intro" }
@@ -356,7 +360,7 @@ function translateWarning(warning: string, languageCode: LanguageCode) {
 
 function readCachedSession() {
   try {
-    const raw = window.localStorage.getItem(SESSION_CACHE_STORAGE_KEY);
+    const raw = window.sessionStorage.getItem(SESSION_CACHE_STORAGE_KEY);
     return raw ? (JSON.parse(raw) as InterviewSession) : null;
   } catch {
     return null;
@@ -364,11 +368,11 @@ function readCachedSession() {
 }
 
 function persistSession(session: InterviewSession) {
-  window.localStorage.setItem(SESSION_CACHE_STORAGE_KEY, JSON.stringify(session));
+  window.sessionStorage.setItem(SESSION_CACHE_STORAGE_KEY, JSON.stringify(session));
 }
 
 function clearPersistedSession() {
-  window.localStorage.removeItem(SESSION_CACHE_STORAGE_KEY);
+  window.sessionStorage.removeItem(SESSION_CACHE_STORAGE_KEY);
 }
 
 function appendTranscript(
@@ -529,7 +533,7 @@ function ProgressBadge({
 function LanguagePicker({
   onSelect,
 }: {
-  onSelect: (languageCode: LanguageCode) => void;
+  onSelect: (languageCode: LanguageCode) => Promise<void>;
 }) {
   const englishCopy = PARTICIPANT_COPY.en;
   const spanishCopy = PARTICIPANT_COPY.es;
@@ -985,24 +989,39 @@ export function InterviewShell() {
     try {
       const saved = await fetchJson<SubmitResponse>("/api/interview/submit", {
         method: "POST",
-        body: JSON.stringify({ session: nextSession }),
+        body: JSON.stringify({
+          submission: {
+            sessionId: nextSession.sessionId,
+            subjectId: nextSession.subjectId,
+            languageCode: nextSession.languageCode,
+            eligibilityResult: nextSession.eligibilityResult,
+            clarificationUsed: nextSession.clarificationUsed,
+            identityResponse: nextSession.identityResponse,
+            rankedSourcesRawInput: nextSession.rankedSourcesRawInput,
+            rankedSourcesDraft: nextSession.rankedSourcesDraft,
+            parserConfidence: nextSession.parserConfidence,
+            parserWarnings: nextSession.parserWarnings,
+            metadata: nextSession.participantKey
+              ? {
+                  name: nextSession.participantKey.name,
+                  age: nextSession.participantKey.age,
+                  gender: nextSession.participantKey.gender,
+                  occupation: nextSession.participantKey.occupation,
+                  email: nextSession.participantKey.email,
+                  date: nextSession.participantKey.date,
+                  location: nextSession.participantKey.location,
+                  interviewMethod: nextSession.participantKey.interviewMethod,
+                  recruitSource: nextSession.participantKey.recruitSource,
+                  interviewLanguage: nextSession.participantKey.interviewLanguage,
+                }
+              : null,
+          },
+        }),
       });
 
       setShouldPersistDraft(false);
       clearPersistedSession();
       setSession(saved.session);
-
-      if (
-        saved.session.status === "completed" &&
-        saved.session.eligibilityResult === "eligible"
-      ) {
-        void fetch("/api/interview/analyze", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId: saved.session.sessionId }),
-          keepalive: true,
-        }).catch(() => undefined);
-      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to submit the interview.");
     } finally {
@@ -1011,10 +1030,19 @@ export function InterviewShell() {
     }
   }
 
-  function startInterview(languageCode: LanguageCode) {
+  async function startInterview(languageCode: LanguageCode) {
     setError(null);
     setShouldPersistDraft(true);
-    setSession(createLocalSession(languageCode));
+
+    try {
+      const started = await fetchJson<StartInterviewResponse>("/api/interview/start", {
+        method: "POST",
+        body: JSON.stringify({ languageCode }),
+      });
+      setSession(started.session);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to start the interview.");
+    }
   }
 
   function resetInterview() {
@@ -1022,6 +1050,7 @@ export function InterviewShell() {
     setShouldPersistDraft(true);
     clearPersistedSession();
     setSession(null);
+    void fetch("/api/interview/start", { method: "DELETE" }).catch(() => undefined);
   }
 
   async function handleAction(payload: LocalAction) {
