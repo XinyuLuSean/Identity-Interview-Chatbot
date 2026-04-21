@@ -150,6 +150,8 @@ export async function createSession(languageCode: LanguageCode = "en") {
     participantKey: null,
     codingRecords: [],
     followUpReasons: [],
+    analysisSummary: null,
+    analysisGeneratedAt: null,
   };
 
   appendTranscript(session, "system", getPrompts(languageCode).intro);

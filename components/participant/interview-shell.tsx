@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
@@ -7,35 +8,62 @@ import {
   CheckCircle2,
   ChevronRight,
   GripVertical,
-  Languages,
   LoaderCircle,
 } from "lucide-react";
 
+import { createMessageId, createSessionId, createSubjectId } from "@/lib/domain/ids";
 import {
+  ENGLISH_PROMPTS,
   GENDER_OPTIONS,
   INTERVIEW_METHODS,
   RECRUITMENT_METHODS,
+  SPANISH_PROMPTS,
 } from "@/lib/domain/protocol";
+import {
+  getCompletionProgress,
+  getNextStep,
+  validateIdentityResponse,
+  validateMetadata,
+  validateRankedSources,
+} from "@/lib/domain/state-machine";
 import type {
   InterviewSession,
+  LanguageCode,
   MetadataInput,
   RankedSource,
   StepId,
 } from "@/lib/domain/schemas";
 import { cn } from "@/lib/utils";
 
-const SESSION_ID_STORAGE_KEY = "identity-interview-current-session";
-const SESSION_CACHE_STORAGE_KEY = "identity-interview-session-cache";
+const SESSION_CACHE_STORAGE_KEY = "identity-interview-session-cache-v2";
 
-type ApiResponse = {
+type ParsedRankingResponse = {
+  rankedSources: RankedSource[];
+  confidence: number;
+  warnings: string[];
+};
+
+type SubmitResponse = {
   session: InterviewSession;
 };
 
+type LocalAction =
+  | { action: "ack_intro" }
+  | { action: "set_eligibility"; eligible: boolean }
+  | { action: "request_clarification" }
+  | { action: "submit_identity_response"; response: string }
+  | { action: "confirm_ranked_sources"; rankedSources: RankedSource[] }
+  | { action: "submit_metadata"; metadata: MetadataInput };
+
 type ParticipantCopy = {
-  badge: string;
-  title: string;
-  description: string;
-  languageLabel: string;
+  studyTitle: string;
+  studySubtitle: string;
+  languageScreenTitle: string;
+  languageScreenBody: string;
+  chooseEnglish: string;
+  chooseSpanish: string;
+  chooseEnglishDescription: string;
+  chooseSpanishDescription: string;
   continue: string;
   yesEligible: string;
   noEligible: string;
@@ -49,15 +77,15 @@ type ParticipantCopy = {
   warningsTitle: string;
   waiting: string;
   syncing: string;
+  parsing: string;
+  finishing: string;
   loading: string;
   retry: string;
   currentQuestion: string;
-  systemLabel: string;
-  participantLabel: string;
+  yourResponses: string;
   progress: string;
   rankLabel: string;
   responsePlaceholder: string;
-  rankedPlaceholder: string;
   infoCollectionTitle: string;
   nameLabel: string;
   ageLabel: string;
@@ -82,13 +110,17 @@ type ParticipantCopy = {
   stepTitles: Record<StepId, string>;
 };
 
-const PARTICIPANT_COPY: Record<"en" | "es", ParticipantCopy> = {
+const PARTICIPANT_COPY: Record<LanguageCode, ParticipantCopy> = {
   en: {
-    badge: "Identity Study",
-    title: "Identity Interview",
-    description:
-      "Please answer each step in order. Your progress will stay on this device if you need to pause and come back later.",
-    languageLabel: "Interview language",
+    studyTitle: "IDENTITY STUDY",
+    studySubtitle: "University of Pennsylvania, EAS 5120 Engineering Negotiation",
+    languageScreenTitle: "Choose your interview language",
+    languageScreenBody:
+      "Select the language you want to use for this interview. The study introduction and every following step will appear in that language.",
+    chooseEnglish: "English",
+    chooseSpanish: "Español",
+    chooseEnglishDescription: "Start the interview in English.",
+    chooseSpanishDescription: "Comience la entrevista en español.",
     continue: "Continue",
     yesEligible: "Yes",
     noEligible: "No",
@@ -96,22 +128,22 @@ const PARTICIPANT_COPY: Record<"en" | "es", ParticipantCopy> = {
     submitResponse: "Submit response",
     confirmRankedSources: "Confirm ranked sources",
     rankingHelp:
-      "Please review the five items below carefully. Edit the text and drag items to rearrange the order before you confirm.",
+      "Review the five ranked sources below, edit the wording if needed, and drag them into the correct order before you continue.",
     moveUp: "Move up",
     moveDown: "Move down",
     dragHandle: "Drag to reorder",
     warningsTitle: "Please double-check these items",
     waiting: "Please wait",
-    syncing: "Saving your response...",
+    syncing: "Saving your interview...",
+    parsing: "Reviewing your response...",
+    finishing: "Finishing your interview...",
     loading: "Preparing your interview...",
     retry: "Try again",
     currentQuestion: "Current question",
-    systemLabel: "Study",
-    participantLabel: "You",
+    yourResponses: "Your responses so far",
     progress: "Progress",
     rankLabel: "Rank",
     responsePlaceholder: "Type your response here...",
-    rankedPlaceholder: "1. ...\n2. ...\n3. ...\n4. ...\n5. ...",
     infoCollectionTitle: "Interview information",
     nameLabel: "Name",
     ageLabel: "Age",
@@ -130,7 +162,7 @@ const PARTICIPANT_COPY: Record<"en" | "es", ParticipantCopy> = {
     completeInterview: "Complete interview",
     completedTitle: "Interview complete",
     completedBody:
-      "Thank you for participating. Your responses have been recorded successfully.",
+      "Thank you for participating. Your interview has been recorded successfully.",
     ineligibleTitle: "Interview ended",
     ineligibleBody:
       "Thank you for your time. This study only continues with participants who identify as Latino.",
@@ -148,11 +180,15 @@ const PARTICIPANT_COPY: Record<"en" | "es", ParticipantCopy> = {
     },
   },
   es: {
-    badge: "Estudio de identidad",
-    title: "Entrevista sobre identidad",
-    description:
-      "Responda cada paso en orden. Su progreso quedará guardado en este dispositivo si necesita pausar y volver después.",
-    languageLabel: "Idioma de la entrevista",
+    studyTitle: "ESTUDIO DE IDENTIDAD",
+    studySubtitle: "University of Pennsylvania, EAS 5120 Engineering Negotiation",
+    languageScreenTitle: "Elija el idioma de la entrevista",
+    languageScreenBody:
+      "Seleccione el idioma que desea usar en esta entrevista. La introduccion del estudio y todos los pasos siguientes apareceran en ese idioma.",
+    chooseEnglish: "English",
+    chooseSpanish: "Español",
+    chooseEnglishDescription: "Start the interview in English.",
+    chooseSpanishDescription: "Comience la entrevista en español.",
     continue: "Continuar",
     yesEligible: "Sí",
     noEligible: "No",
@@ -160,22 +196,22 @@ const PARTICIPANT_COPY: Record<"en" | "es", ParticipantCopy> = {
     submitResponse: "Enviar respuesta",
     confirmRankedSources: "Confirmar fuentes clasificadas",
     rankingHelp:
-      "Revise cuidadosamente los cinco elementos a continuación. Edite el texto y arrastre los elementos para reorganizar el orden antes de confirmar.",
+      "Revise las cinco fuentes clasificadas a continuación, edite la redacción si es necesario y arrástrelas al orden correcto antes de continuar.",
     moveUp: "Mover arriba",
     moveDown: "Mover abajo",
     dragHandle: "Arrastrar para reordenar",
     warningsTitle: "Por favor revise estos puntos",
     waiting: "Espere por favor",
-    syncing: "Guardando su respuesta...",
+    syncing: "Guardando su entrevista...",
+    parsing: "Revisando su respuesta...",
+    finishing: "Finalizando su entrevista...",
     loading: "Preparando su entrevista...",
     retry: "Intentar de nuevo",
     currentQuestion: "Pregunta actual",
-    systemLabel: "Estudio",
-    participantLabel: "Usted",
+    yourResponses: "Sus respuestas hasta ahora",
     progress: "Progreso",
     rankLabel: "Rango",
     responsePlaceholder: "Escriba su respuesta aquí...",
-    rankedPlaceholder: "1. ...\n2. ...\n3. ...\n4. ...\n5. ...",
     infoCollectionTitle: "Información de la entrevista",
     nameLabel: "Nombre",
     ageLabel: "Edad",
@@ -194,7 +230,7 @@ const PARTICIPANT_COPY: Record<"en" | "es", ParticipantCopy> = {
     completeInterview: "Completar entrevista",
     completedTitle: "Entrevista completa",
     completedBody:
-      "Gracias por participar. Sus respuestas se han registrado correctamente.",
+      "Gracias por participar. Su entrevista se registró correctamente.",
     ineligibleTitle: "Entrevista finalizada",
     ineligibleBody:
       "Gracias por su tiempo. Este estudio solo continúa con participantes que se identifican como latinos.",
@@ -278,7 +314,26 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-function translateWarning(warning: string, languageCode: "en" | "es") {
+function getPrompts(languageCode: LanguageCode) {
+  return languageCode === "es" ? SPANISH_PROMPTS : ENGLISH_PROMPTS;
+}
+
+function buildMetadataState(session: InterviewSession): MetadataInput {
+  return {
+    name: session.participantKey?.name ?? "",
+    age: session.participantKey?.age ?? session.structuredRecord?.age ?? "",
+    gender: session.participantKey?.gender ?? session.structuredRecord?.gender ?? "",
+    occupation: session.participantKey?.occupation ?? "",
+    email: session.participantKey?.email ?? "",
+    date: session.participantKey?.date ?? new Date().toISOString().slice(0, 10),
+    location: session.participantKey?.location ?? "",
+    interviewMethod: INTERVIEW_METHODS[0],
+    recruitSource: session.participantKey?.recruitSource ?? RECRUITMENT_METHODS[0],
+    interviewLanguage: session.languageCode === "es" ? "Spanish" : "English",
+  };
+}
+
+function translateWarning(warning: string, languageCode: LanguageCode) {
   if (languageCode === "en") {
     return warning;
   }
@@ -295,22 +350,6 @@ function translateWarning(warning: string, languageCode: "en" | "es") {
   }
 }
 
-function buildMetadataState(session: InterviewSession): MetadataInput {
-  return {
-    name: session.participantKey?.name ?? "",
-    age: session.participantKey?.age ?? session.structuredRecord?.age ?? "",
-    gender: session.participantKey?.gender ?? session.structuredRecord?.gender ?? "",
-    occupation: session.participantKey?.occupation ?? "",
-    email: session.participantKey?.email ?? "",
-    date: session.participantKey?.date ?? new Date().toISOString().slice(0, 10),
-    location: session.participantKey?.location ?? "",
-    interviewMethod: INTERVIEW_METHODS[0],
-    recruitSource:
-      session.participantKey?.recruitSource ?? RECRUITMENT_METHODS[0],
-    interviewLanguage: session.languageCode === "es" ? "Spanish" : "English",
-  };
-}
-
 function readCachedSession() {
   try {
     const raw = window.localStorage.getItem(SESSION_CACHE_STORAGE_KEY);
@@ -321,13 +360,124 @@ function readCachedSession() {
 }
 
 function persistSession(session: InterviewSession) {
-  window.localStorage.setItem(SESSION_ID_STORAGE_KEY, session.sessionId);
   window.localStorage.setItem(SESSION_CACHE_STORAGE_KEY, JSON.stringify(session));
 }
 
 function clearPersistedSession() {
-  window.localStorage.removeItem(SESSION_ID_STORAGE_KEY);
   window.localStorage.removeItem(SESSION_CACHE_STORAGE_KEY);
+}
+
+function appendTranscript(
+  session: InterviewSession,
+  role: "system" | "participant" | "researcher",
+  content: string,
+) {
+  const index = session.transcript.length;
+  session.transcript.push({
+    id: createMessageId(session.sessionId, index),
+    sessionId: session.sessionId,
+    index,
+    role,
+    content,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+function updateStep(session: InterviewSession, step: StepId) {
+  session.currentStep = step;
+  session.updatedAt = new Date().toISOString();
+}
+
+function buildStructuredRecord(session: InterviewSession, metadata: MetadataInput) {
+  const sources = session.rankedSourcesDraft;
+  if (sources.length !== 5) {
+    return null;
+  }
+
+  return {
+    subjectId: session.subjectId,
+    source1: sources[0].text,
+    source2: sources[1].text,
+    source3: sources[2].text,
+    source4: sources[3].text,
+    source5: sources[4].text,
+    age: metadata.age.trim(),
+    gender: metadata.gender.trim(),
+  };
+}
+
+function cloneSession(session: InterviewSession): InterviewSession {
+  return {
+    ...session,
+    rankedSourcesDraft: session.rankedSourcesDraft.map((source) => ({ ...source })),
+    parserWarnings: [...session.parserWarnings],
+    transcript: session.transcript.map((message) => ({ ...message })),
+    structuredRecord: session.structuredRecord ? { ...session.structuredRecord } : null,
+    participantKey: session.participantKey ? { ...session.participantKey } : null,
+    codingRecords: session.codingRecords.map((record) => ({ ...record })),
+    followUpReasons: [...session.followUpReasons],
+  };
+}
+
+function createLocalSession(languageCode: LanguageCode): InterviewSession {
+  const now = new Date().toISOString();
+  const session: InterviewSession = {
+    sessionId: createSessionId(),
+    subjectId: createSubjectId(),
+    status: "active",
+    eligibilityResult: "unknown",
+    currentStep: "intro",
+    languageCode,
+    createdAt: now,
+    updatedAt: now,
+    completedAt: null,
+    clarificationUsed: false,
+    identityResponse: null,
+    rankedSourcesRawInput: null,
+    rankedSourcesDraft: [],
+    parserConfidence: null,
+    parserWarnings: [],
+    transcript: [],
+    structuredRecord: null,
+    participantKey: null,
+    codingRecords: [],
+    followUpReasons: [],
+    analysisSummary: null,
+    analysisGeneratedAt: null,
+  };
+
+  appendTranscript(session, "system", getPrompts(languageCode).intro);
+  return session;
+}
+
+function getParticipantSummaryLabels(languageCode: LanguageCode) {
+  if (languageCode === "es") {
+    return {
+      name: "Nombre",
+      age: "Edad",
+      gender: "Género",
+      occupation: "Ocupación",
+      email: "Correo electrónico",
+      date: "Fecha de la entrevista",
+      location: "Ubicación actual",
+      interviewMethod: "Método de entrevista",
+      recruitSource: "Cómo se enteró de esta entrevista",
+      interviewLanguage: "Idioma utilizado en esta entrevista",
+    };
+  }
+
+  return {
+    name: "Name",
+    age: "Age",
+    gender: "Gender",
+    occupation: "Occupation",
+    email: "Email",
+    date: "Interview date",
+    location: "Current location",
+    interviewMethod: "Interview method",
+    recruitSource: "How you learned about this interview",
+    interviewLanguage: "Language used for this interview",
+  };
 }
 
 function ProgressBadge({
@@ -349,10 +499,10 @@ function ProgressBadge({
   const width =
     step === "terminated_ineligible"
       ? 100
-      : Math.max(((stepIndex + 1) / labels.length) * 100, 8);
+      : Math.max((((stepIndex === -1 ? 0 : stepIndex) + 1) / labels.length) * 100, 8);
 
   return (
-    <div className="rounded-[1.8rem] border border-ink/10 bg-white/75 p-4">
+    <div className="rounded-[1.8rem] border border-ink/10 bg-white/80 p-4">
       <div className="mb-3 flex items-center justify-between gap-3 text-sm text-ink/65">
         <span className="font-medium">{copy.progress}</span>
         <span className="rounded-full bg-pine/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-pine">
@@ -365,7 +515,78 @@ function ProgressBadge({
           style={{ width: `${width}%` }}
         />
       </div>
+      <div className="mt-3 text-xs uppercase tracking-[0.18em] text-ink/40">
+        {getCompletionProgress(step)}%
+      </div>
     </div>
+  );
+}
+
+function LanguagePicker({
+  onSelect,
+}: {
+  onSelect: (languageCode: LanguageCode) => void;
+}) {
+  const englishCopy = PARTICIPANT_COPY.en;
+  const spanishCopy = PARTICIPANT_COPY.es;
+
+  return (
+    <main className="grid-paper min-h-screen px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-3xl">
+        <section className="card-surface rounded-[2.4rem] border border-white/60 p-6 shadow-card sm:p-10">
+          <div className="flex flex-col gap-6 border-b border-ink/8 pb-8">
+            <div className="flex items-center gap-4">
+              <Image
+                alt="Penn shield"
+                className="h-16 w-16 rounded-2xl bg-[#011F5B] p-1 shadow-sm"
+                height="64"
+                src="/penn-shield.svg"
+                width="64"
+              />
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#011F5B]">
+                  {englishCopy.studyTitle}
+                </p>
+                <h1 className="mt-2 font-display text-3xl text-ink sm:text-4xl">
+                  {englishCopy.languageScreenTitle}
+                </h1>
+                <p className="mt-1 text-lg text-ink/78">{spanishCopy.languageScreenTitle}</p>
+                <p className="mt-3 text-sm text-ink/65">{englishCopy.studySubtitle}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-8 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="space-y-5">
+              <p className="max-w-xl text-base leading-7 text-ink/72">
+                {englishCopy.languageScreenBody}
+              </p>
+              <p className="max-w-xl text-base leading-7 text-ink/72">
+                {spanishCopy.languageScreenBody}
+              </p>
+            </div>
+            <div className="grid gap-3">
+              <button
+                className="rounded-[1.8rem] border border-[#011F5B]/15 bg-white px-5 py-5 text-left transition hover:border-[#011F5B]/35 hover:bg-[#011F5B]/[0.03]"
+                onClick={() => onSelect("en")}
+                type="button"
+              >
+                <div className="text-lg font-semibold text-ink">{englishCopy.chooseEnglish}</div>
+                <div className="mt-1 text-sm text-ink/60">{englishCopy.chooseEnglishDescription}</div>
+              </button>
+              <button
+                className="rounded-[1.8rem] border border-[#A51C30]/15 bg-white px-5 py-5 text-left transition hover:border-[#A51C30]/35 hover:bg-[#A51C30]/[0.03]"
+                onClick={() => onSelect("es")}
+                type="button"
+              >
+                <div className="text-lg font-semibold text-ink">{englishCopy.chooseSpanish}</div>
+                <div className="mt-1 text-sm text-ink/60">{englishCopy.chooseSpanishDescription}</div>
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
   );
 }
 
@@ -376,7 +597,7 @@ function StepInput({
   copy,
 }: {
   session: InterviewSession;
-  onSubmit: (payload: Record<string, unknown>) => Promise<void>;
+  onSubmit: (payload: LocalAction) => Promise<void>;
   busy: boolean;
   copy: ParticipantCopy;
 }) {
@@ -403,14 +624,8 @@ function StepInput({
   useEffect(() => {
     if (session.currentStep === "identity_question" || session.currentStep === "clarification_if_needed") {
       setTextValue(session.identityResponse ?? "");
-      return;
     }
-
-  }, [
-    session.currentStep,
-    session.identityResponse,
-    session.rankedSourcesDraft.length,
-  ]);
+  }, [session.currentStep, session.identityResponse]);
 
   useEffect(() => {
     setRankedSources(ensureFiveRankedSlots(session.rankedSourcesDraft));
@@ -424,51 +639,15 @@ function StepInput({
   switch (session.currentStep) {
     case "intro":
       return (
-        <div className="space-y-5">
-          <div className="rounded-[1.8rem] border border-ink/10 bg-white/80 p-5">
-            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-pine">
-              <Languages className="h-4 w-4" />
-              {copy.languageLabel}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                className={cn(
-                  "rounded-full border px-4 py-2 text-sm transition",
-                  session.languageCode === "en"
-                    ? "border-pine bg-pine text-white"
-                    : "border-ink/10 bg-white text-ink",
-                )}
-                disabled={busy}
-                onClick={() => onSubmit({ action: "set_language", languageCode: "en" })}
-                type="button"
-              >
-                English
-              </button>
-              <button
-                className={cn(
-                  "rounded-full border px-4 py-2 text-sm transition",
-                  session.languageCode === "es"
-                    ? "border-pine bg-pine text-white"
-                    : "border-ink/10 bg-white text-ink",
-                )}
-                disabled={busy}
-                onClick={() => onSubmit({ action: "set_language", languageCode: "es" })}
-                type="button"
-              >
-                Español
-              </button>
-            </div>
-          </div>
-          <button
-            className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-ink/90 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={busy}
-            onClick={() => onSubmit({ action: "ack_intro" })}
-            type="button"
-          >
-            {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}
-            {busy ? copy.waiting : copy.continue}
-          </button>
-        </div>
+        <button
+          className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-ink/90 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={busy}
+          onClick={() => onSubmit({ action: "ack_intro" })}
+          type="button"
+        >
+          {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}
+          {busy ? copy.waiting : copy.continue}
+        </button>
       );
     case "eligibility":
       return (
@@ -496,7 +675,7 @@ function StepInput({
       return (
         <div className="space-y-3">
           <textarea
-            className="min-h-32 w-full rounded-[1.8rem] border border-ink/10 bg-white px-4 py-4 text-sm outline-none transition focus:border-clay disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-36 w-full rounded-[1.8rem] border border-ink/10 bg-white px-4 py-4 text-sm outline-none transition focus:border-clay disabled:cursor-not-allowed disabled:opacity-60"
             disabled={busy}
             onChange={(event) => setTextValue(event.target.value)}
             placeholder={copy.responsePlaceholder}
@@ -540,11 +719,9 @@ function StepInput({
                   draggedIndex === index ? "border-pine/40 bg-pine/5 shadow-sm" : "",
                 )}
                 draggable={!busy}
-                key={source.rank}
+                key={`${source.rank}-${index}`}
                 onDragEnd={() => setDraggedIndex(null)}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                }}
+                onDragOver={(event) => event.preventDefault()}
                 onDragStart={() => setDraggedIndex(index)}
                 onDrop={() => {
                   if (draggedIndex === null) {
@@ -576,9 +753,7 @@ function StepInput({
                     onChange={(event) =>
                       setRankedSources((current) =>
                         current.map((item, itemIndex) =>
-                          itemIndex === index
-                            ? { ...item, text: event.target.value }
-                            : item,
+                          itemIndex === index ? { ...item, text: event.target.value } : item,
                         ),
                       )
                     }
@@ -612,9 +787,7 @@ function StepInput({
           <button
             className="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-ink/90 disabled:cursor-not-allowed disabled:opacity-60"
             disabled={busy}
-            onClick={() =>
-              onSubmit({ action: "confirm_ranked_sources", rankedSources })
-            }
+            onClick={() => onSubmit({ action: "confirm_ranked_sources", rankedSources })}
             type="button"
           >
             {busy ? copy.waiting : copy.confirmRankedSources}
@@ -686,12 +859,12 @@ function StepInput({
               value={metadata.email}
             />
             <input
+              aria-label={copy.dateLabel}
               className="rounded-2xl border border-ink/10 bg-white px-4 py-3 text-sm outline-none transition focus:border-clay disabled:cursor-not-allowed disabled:opacity-60"
               disabled={busy}
               onChange={(event) =>
                 setMetadata((current) => ({ ...current, date: event.target.value }))
               }
-              aria-label={copy.dateLabel}
               type="date"
               value={metadata.date}
             />
@@ -753,73 +926,27 @@ function StepInput({
 export function InterviewShell() {
   const [session, setSession] = useState<InterviewSession | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [booting, setBooting] = useState(true);
+  const [hydrating, setHydrating] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [shouldPersistDraft, setShouldPersistDraft] = useState(true);
+  const [busyMessage, setBusyMessage] = useState<string | null>(null);
   const transcriptBottomRef = useRef<HTMLDivElement | null>(null);
 
-  const copy = PARTICIPANT_COPY[session?.languageCode ?? "en"];
-  const busy = booting || isSubmitting;
-
-  async function bootstrapSession(forceNew = false) {
-    setError(null);
-
-    if (!forceNew) {
-      const cachedSession = readCachedSession();
-      if (cachedSession) {
-        setSession(cachedSession);
-        setBooting(false);
-      } else {
-        setBooting(true);
-      }
-    } else {
-      setBooting(true);
-      clearPersistedSession();
-      setSession(null);
-    }
-
-    try {
-      let resolvedSession: InterviewSession | null = null;
-      const storedSessionId = forceNew
-        ? null
-        : window.localStorage.getItem(SESSION_ID_STORAGE_KEY);
-
-      if (storedSessionId) {
-        try {
-          const existing = await fetchJson<ApiResponse>(`/api/sessions/${storedSessionId}`);
-          resolvedSession = existing.session;
-        } catch {
-          clearPersistedSession();
-        }
-      }
-
-      if (!resolvedSession) {
-        const created = await fetchJson<ApiResponse>("/api/sessions", {
-          method: "POST",
-          body: JSON.stringify({ languageCode: "en" }),
-        });
-        resolvedSession = created.session;
-      }
-
-      setSession(resolvedSession);
-      persistSession(resolvedSession);
-    } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "Unable to start the interview.",
-      );
-    } finally {
-      setBooting(false);
-    }
-  }
-
   useEffect(() => {
-    void bootstrapSession();
+    const cachedSession = readCachedSession();
+    if (cachedSession?.status === "active") {
+      setSession(cachedSession);
+    } else {
+      clearPersistedSession();
+    }
+    setHydrating(false);
   }, []);
 
   useEffect(() => {
-    if (session) {
+    if (!hydrating && session && shouldPersistDraft) {
       persistSession(session);
     }
-  }, [session]);
+  }, [hydrating, session, shouldPersistDraft]);
 
   useEffect(() => {
     transcriptBottomRef.current?.scrollIntoView({
@@ -827,6 +954,9 @@ export function InterviewShell() {
       block: "end",
     });
   }, [session?.transcript.length, session?.currentStep]);
+
+  const activeLanguage: LanguageCode = session?.languageCode ?? "en";
+  const copy = PARTICIPANT_COPY[activeLanguage];
 
   const currentPrompt = useMemo(
     () =>
@@ -836,29 +966,223 @@ export function InterviewShell() {
     [session],
   );
 
-  async function handleAction(payload: Record<string, unknown>) {
-    if (!session || isSubmitting) {
-      return;
+  const isFinished =
+    session?.currentStep === "completed" || session?.currentStep === "terminated_ineligible";
+
+  const conversationMessages = useMemo(() => {
+    const transcript = session?.transcript ?? [];
+    if (
+      session?.currentStep === "completed" ||
+      session?.currentStep === "terminated_ineligible"
+    ) {
+      return transcript;
     }
 
+    const latestSystemIndex = [...transcript]
+      .reverse()
+      .findIndex((message) => message.role === "system");
+
+    if (latestSystemIndex === -1) {
+      return transcript;
+    }
+
+    const absoluteIndex = transcript.length - 1 - latestSystemIndex;
+    return transcript.filter((_, index) => index !== absoluteIndex);
+  }, [session]);
+
+  async function finalizeSession(nextSession: InterviewSession) {
     setIsSubmitting(true);
+    setError(null);
+    setBusyMessage(nextSession.status === "completed" ? copy.finishing : copy.syncing);
+
     try {
-      setError(null);
-      const next = await fetchJson<ApiResponse>(`/api/sessions/${session.sessionId}`, {
-        method: "PATCH",
-        body: JSON.stringify(payload),
+      const saved = await fetchJson<SubmitResponse>("/api/interview/submit", {
+        method: "POST",
+        body: JSON.stringify({ session: nextSession }),
       });
-      setSession(next.session);
+
+      setShouldPersistDraft(false);
+      clearPersistedSession();
+      setSession(saved.session);
+
+      if (
+        saved.session.status === "completed" &&
+        saved.session.eligibilityResult === "eligible"
+      ) {
+        void fetch("/api/interview/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: saved.session.sessionId }),
+          keepalive: true,
+        }).catch(() => undefined);
+      }
     } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "Unable to update the interview.",
-      );
+      setError(caught instanceof Error ? caught.message : "Unable to submit the interview.");
     } finally {
+      setBusyMessage(null);
       setIsSubmitting(false);
     }
   }
 
-  if (booting && !session) {
+  function startInterview(languageCode: LanguageCode) {
+    setError(null);
+    setShouldPersistDraft(true);
+    setSession(createLocalSession(languageCode));
+  }
+
+  function resetInterview() {
+    setError(null);
+    setShouldPersistDraft(true);
+    clearPersistedSession();
+    setSession(null);
+  }
+
+  async function handleAction(payload: LocalAction) {
+    if (!session || isSubmitting) {
+      return;
+    }
+
+    const next = cloneSession(session);
+    const prompts = getPrompts(next.languageCode);
+
+    switch (payload.action) {
+      case "ack_intro": {
+        appendTranscript(next, "participant", prompts.introAck);
+        updateStep(next, getNextStep(next.currentStep));
+        appendTranscript(next, "system", prompts.eligibility);
+        setSession(next);
+        return;
+      }
+      case "set_eligibility": {
+        appendTranscript(
+          next,
+          "participant",
+          payload.eligible ? prompts.eligibilityYes : prompts.eligibilityNo,
+        );
+        next.eligibilityResult = payload.eligible ? "eligible" : "ineligible";
+
+        if (!payload.eligible) {
+          next.status = "terminated_ineligible";
+          updateStep(next, "terminated_ineligible");
+          appendTranscript(next, "system", prompts.ineligible);
+          await finalizeSession(next);
+          return;
+        }
+
+        updateStep(next, getNextStep(next.currentStep));
+        appendTranscript(next, "system", prompts.identityQuestion);
+        setSession(next);
+        return;
+      }
+      case "request_clarification": {
+        next.clarificationUsed = true;
+        updateStep(next, "clarification_if_needed");
+        appendTranscript(next, "participant", prompts.clarificationRequest);
+        appendTranscript(next, "system", prompts.clarification);
+        setSession(next);
+        return;
+      }
+      case "submit_identity_response": {
+        if (!validateIdentityResponse(payload.response)) {
+          setError("Please provide a more complete identity response.");
+          return;
+        }
+
+        setIsSubmitting(true);
+        setError(null);
+        setBusyMessage(copy.parsing);
+
+        try {
+          const parsed = await fetchJson<ParsedRankingResponse>("/api/interview/parse", {
+            method: "POST",
+            body: JSON.stringify({ input: payload.response }),
+          });
+
+          next.identityResponse = payload.response.trim();
+          next.rankedSourcesRawInput = next.identityResponse;
+          appendTranscript(next, "participant", next.identityResponse);
+          next.rankedSourcesDraft = parsed.rankedSources;
+          next.parserConfidence = parsed.confidence;
+          next.parserWarnings = parsed.warnings;
+          updateStep(next, "rank_confirmation");
+          appendTranscript(next, "system", prompts.ranking);
+          setSession(next);
+        } catch (caught) {
+          setError(caught instanceof Error ? caught.message : "Unable to review the response.");
+        } finally {
+          setBusyMessage(null);
+          setIsSubmitting(false);
+        }
+        return;
+      }
+      case "confirm_ranked_sources": {
+        if (!validateRankedSources(payload.rankedSources)) {
+          setError("Please confirm five distinct ranked identity sources.");
+          return;
+        }
+
+        next.rankedSourcesDraft = payload.rankedSources.map((source) => ({
+          rank: source.rank,
+          text: source.text.trim(),
+        }));
+        next.updatedAt = new Date().toISOString();
+        appendTranscript(
+          next,
+          "participant",
+          next.rankedSourcesDraft.map((source) => `${source.rank}. ${source.text}`).join("\n"),
+        );
+        updateStep(next, getNextStep(next.currentStep));
+        appendTranscript(next, "system", prompts.metadata);
+        setSession(next);
+        return;
+      }
+      case "submit_metadata": {
+        const validation = validateMetadata(payload.metadata);
+        if (!validation.success) {
+          setError(validation.error.issues[0]?.message ?? "Invalid metadata.");
+          return;
+        }
+
+        next.structuredRecord = buildStructuredRecord(next, validation.data);
+        if (!next.structuredRecord) {
+          setError("Five ranked identity sources are required before information collection.");
+          return;
+        }
+
+        next.participantKey = {
+          subjectId: next.subjectId,
+          ...validation.data,
+          interviewMethod: INTERVIEW_METHODS[0],
+          interviewLanguage: next.languageCode === "es" ? "Spanish" : "English",
+        };
+        const labels = getParticipantSummaryLabels(next.languageCode);
+        appendTranscript(
+          next,
+          "participant",
+          [
+            `${labels.name}: ${next.participantKey.name}`,
+            `${labels.age}: ${next.participantKey.age}`,
+            `${labels.gender}: ${next.participantKey.gender}`,
+            `${labels.occupation}: ${next.participantKey.occupation}`,
+            `${labels.email}: ${next.participantKey.email}`,
+            `${labels.date}: ${next.participantKey.date}`,
+            `${labels.location}: ${next.participantKey.location}`,
+            `${labels.interviewMethod}: ${next.participantKey.interviewMethod}`,
+            `${labels.recruitSource}: ${next.participantKey.recruitSource}`,
+            `${labels.interviewLanguage}: ${next.participantKey.interviewLanguage}`,
+          ].join("\n"),
+        );
+        next.status = "completed";
+        next.completedAt = new Date().toISOString();
+        updateStep(next, "completed");
+        appendTranscript(next, "system", prompts.completed);
+        await finalizeSession(next);
+        return;
+      }
+    }
+  }
+
+  if (hydrating) {
     return (
       <main className="grid min-h-screen place-items-center px-6">
         <div className="card-surface flex items-center gap-3 rounded-full border border-ink/10 px-6 py-4 shadow-card">
@@ -870,27 +1194,8 @@ export function InterviewShell() {
   }
 
   if (!session) {
-    return (
-      <main className="grid min-h-screen place-items-center px-6">
-        <div className="card-surface w-full max-w-xl rounded-[2rem] border border-white/60 p-8 shadow-card">
-          <h1 className="font-display text-3xl text-ink">{copy.title}</h1>
-          <p className="mt-3 text-sm leading-6 text-ink/70">
-            {error ?? copy.loading}
-          </p>
-          <button
-            className="mt-6 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white"
-            onClick={() => void bootstrapSession(true)}
-            type="button"
-          >
-            {copy.retry}
-          </button>
-        </div>
-      </main>
-    );
+    return <LanguagePicker onSelect={startInterview} />;
   }
-
-  const isFinished =
-    session.currentStep === "completed" || session.currentStep === "terminated_ineligible";
 
   return (
     <main className="grid-paper min-h-screen px-4 py-6 sm:px-6 lg:px-8">
@@ -900,56 +1205,82 @@ export function InterviewShell() {
             <div className="pointer-events-none absolute inset-0 z-10 flex items-start justify-center bg-mist/75 px-4 py-5 backdrop-blur-[2px]">
               <div className="inline-flex items-center gap-2 rounded-full border border-ink/10 bg-white px-4 py-2 text-sm text-ink/70 shadow-sm">
                 <LoaderCircle className="h-4 w-4 animate-spin text-pine" />
-                {copy.syncing}
+                {busyMessage ?? copy.syncing}
               </div>
             </div>
           ) : null}
 
-          <div className="space-y-4 border-b border-ink/8 pb-6">
-            <div className="inline-flex items-center gap-2 rounded-full border border-pine/15 bg-pine/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-pine">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              {copy.badge}
-            </div>
-            <div className="space-y-2">
-              <h1 className="font-display text-4xl leading-tight text-ink sm:text-5xl">
-                {copy.title}
-              </h1>
-              <p className="max-w-2xl text-sm leading-6 text-ink/68">{copy.description}</p>
+          <div className="space-y-5 border-b border-ink/8 pb-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-4">
+                <Image
+                  alt="Penn shield"
+                  className="h-16 w-16 rounded-2xl bg-[#011F5B] p-1 shadow-sm"
+                  height="64"
+                  src="/penn-shield.svg"
+                  width="64"
+                />
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#011F5B]">
+                    {copy.studyTitle}
+                  </p>
+                  <p className="mt-2 text-sm text-ink/62">{copy.studySubtitle}</p>
+                </div>
+              </div>
+              <button
+                className="rounded-full border border-ink/10 bg-white px-4 py-2 text-sm font-medium text-ink transition hover:border-ink/25"
+                onClick={resetInterview}
+                type="button"
+              >
+                {copy.startAnother}
+              </button>
             </div>
             <ProgressBadge copy={copy} step={session.currentStep} />
           </div>
 
-          <div className="mt-6 rounded-[1.8rem] border border-ink/10 bg-white/75 p-4">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.22em] text-ink/45">
-              {copy.currentQuestion}
+          {!isFinished ? (
+            <div className="mt-6 rounded-[1.8rem] border border-ink/10 bg-white/80 p-5">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.22em] text-ink/45">
+                {copy.currentQuestion}
+              </div>
+              <p className="whitespace-pre-wrap text-sm leading-7 text-ink/80">{currentPrompt}</p>
             </div>
-            <p className="whitespace-pre-wrap text-sm leading-6 text-ink/78">{currentPrompt}</p>
-          </div>
+          ) : null}
 
-          <div className="mt-6 grid gap-4">
-            {session.transcript.map((message) => {
-              const bubbleLabel =
-                message.role === "participant" ? copy.participantLabel : copy.systemLabel;
-
-              return (
-                <div
-                  className={cn(
-                    "conversation-fade max-w-[88%] rounded-[1.7rem] px-5 py-4 text-sm leading-6 shadow-sm",
-                    message.role === "participant"
-                      ? "ml-auto rounded-br-md bg-pine text-white"
-                      : "rounded-bl-md border border-ink/10 bg-white/90 text-ink",
-                  )}
-                  key={message.id}
-                >
-                  <div className="mb-1 text-[10px] uppercase tracking-[0.24em] opacity-65">
-                    {bubbleLabel}
+          {conversationMessages.length > 0 ? (
+            <div className="mt-6">
+              <div className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-ink/45">
+                {copy.yourResponses}
+              </div>
+              <div className="grid gap-4">
+                {conversationMessages.map((message) => (
+                  <div
+                    className={cn(
+                      "conversation-fade max-w-[92%] rounded-[1.7rem] px-5 py-4 text-sm leading-6 shadow-sm",
+                      message.role === "participant"
+                        ? "ml-auto rounded-br-md bg-pine text-white"
+                        : message.role === "researcher"
+                          ? "max-w-[88%] rounded-bl-md border border-ember/20 bg-ember/10 text-ink"
+                          : "max-w-[88%] rounded-bl-md border border-ink/10 bg-white/90 text-ink",
+                    )}
+                    key={message.id}
+                  >
+                    <div className="mb-1 text-[10px] uppercase tracking-[0.24em] opacity-70">
+                      {message.role === "participant"
+                        ? "You"
+                        : message.role === "researcher"
+                          ? "Researcher"
+                          : activeLanguage === "es"
+                            ? "Estudio"
+                            : "Study"}
+                    </div>
+                    <div className="whitespace-pre-wrap">{message.content}</div>
                   </div>
-                  <div className="whitespace-pre-wrap">{message.content}</div>
-                </div>
-              );
-            })}
-            <div ref={transcriptBottomRef} />
-          </div>
+                ))}
+                <div ref={transcriptBottomRef} />
+              </div>
+            </div>
+          ) : null}
 
           {session.parserWarnings.length > 0 && session.currentStep === "rank_confirmation" ? (
             <div className="mt-5 rounded-[1.8rem] border border-ember/20 bg-ember/8 p-4 text-sm text-ink/80">
@@ -970,7 +1301,12 @@ export function InterviewShell() {
 
           {!isFinished ? (
             <div className="mt-6 border-t border-ink/8 pt-6">
-              <StepInput busy={busy} copy={copy} onSubmit={handleAction} session={session} />
+              <StepInput
+                busy={isSubmitting}
+                copy={copy}
+                onSubmit={handleAction}
+                session={session}
+              />
             </div>
           ) : (
             <div className="mt-6 rounded-[1.8rem] border border-pine/20 bg-pine/8 p-6">
@@ -984,13 +1320,10 @@ export function InterviewShell() {
                   ? copy.completedBody
                   : copy.ineligibleBody}
               </p>
-              <button
-                className="mt-5 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-ink/90"
-                onClick={() => void bootstrapSession(true)}
-                type="button"
-              >
-                {copy.startAnother}
-              </button>
+              <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-pine/15 bg-white px-4 py-2 text-sm font-medium text-pine">
+                <CheckCircle2 className="h-4 w-4" />
+                {session.subjectId}
+              </div>
             </div>
           )}
         </section>

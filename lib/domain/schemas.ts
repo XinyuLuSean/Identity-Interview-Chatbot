@@ -122,6 +122,8 @@ export const InterviewSessionSchema = z.object({
   participantKey: ParticipantKeySchema.nullable(),
   codingRecords: z.array(CodingRecordSchema),
   followUpReasons: z.array(FollowUpReasonSchema),
+  analysisSummary: z.string().nullable().optional().default(null),
+  analysisGeneratedAt: z.string().nullable().optional().default(null),
 });
 
 export const ResearchDatasetSchema = z.object({

@@ -49,6 +49,8 @@ const SESSION_HEADERS = [
   "parserConfidence",
   "parserWarnings",
   "followUpReasons",
+  "analysisSummary",
+  "analysisGeneratedAt",
 ];
 
 const TRANSCRIPT_HEADERS = [
@@ -246,6 +248,8 @@ function reconstructSessions(
       followUpReasons: FollowUpReasonSchema.array().parse(
         JSON.parse(row.followUpReasons || "[]"),
       ),
+      analysisSummary: row.analysisSummary || null,
+      analysisGeneratedAt: row.analysisGeneratedAt || null,
     }),
   );
 }
@@ -268,6 +272,8 @@ function flattenDataset(dataset: ResearchDataset) {
     session.parserConfidence?.toString() ?? "",
     JSON.stringify(session.parserWarnings),
     JSON.stringify(session.followUpReasons),
+    session.analysisSummary ?? "",
+    session.analysisGeneratedAt ?? "",
   ]);
 
   const transcript = dataset.sessions.flatMap((session) =>

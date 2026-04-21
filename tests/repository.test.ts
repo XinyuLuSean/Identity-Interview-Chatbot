@@ -29,6 +29,8 @@ function createSession(sessionId: string): InterviewSession {
     participantKey: null,
     codingRecords: [],
     followUpReasons: [],
+    analysisSummary: null,
+    analysisGeneratedAt: null,
   };
 }
 

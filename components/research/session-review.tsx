@@ -238,57 +238,73 @@ export function SessionReview({ initialSession }: { initialSession: InterviewSes
         </div>
 
         <div className="card-surface rounded-[2rem] border border-white/60 p-6 shadow-card">
+          <p className="text-xs uppercase tracking-[0.24em] text-ink/45">AI review</p>
+          <h2 className="font-display text-3xl text-ink">Automated analysis summary</h2>
+          <div className="mt-5 rounded-[1.6rem] border border-ink/10 bg-white/80 p-4 text-sm leading-6 text-ink/72">
+            {session.analysisSummary ??
+              "Analysis is still pending or was not generated yet. The participant flow now submits first and runs the deeper AI review afterward."}
+          </div>
+        </div>
+
+        <div className="card-surface rounded-[2rem] border border-white/60 p-6 shadow-card">
           <p className="text-xs uppercase tracking-[0.24em] text-ink/45">Coding review</p>
           <h2 className="font-display text-3xl text-ink">Category approval</h2>
-          <div className="mt-5 space-y-4">
-            {session.codingRecords.map((record, index) => (
-              <div className="rounded-3xl border border-ink/10 bg-white/80 p-4" key={record.rank}>
-                <div className="mb-3 flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.24em] text-ink/45">
-                      Rank {record.rank}
+          {session.codingRecords.length === 0 ? (
+            <div className="mt-5 rounded-[1.6rem] border border-ink/10 bg-white/80 p-4 text-sm leading-6 text-ink/72">
+              Coding suggestions are not available yet. If the participant just completed the interview,
+              refresh in a moment after the background analysis finishes.
+            </div>
+          ) : (
+            <div className="mt-5 space-y-4">
+              {session.codingRecords.map((record, index) => (
+                <div className="rounded-3xl border border-ink/10 bg-white/80 p-4" key={record.rank}>
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs uppercase tracking-[0.24em] text-ink/45">
+                        Rank {record.rank}
+                      </div>
+                      <div className="font-semibold text-ink">{record.rawSourceText}</div>
                     </div>
-                    <div className="font-semibold text-ink">{record.rawSourceText}</div>
+                    <div className="rounded-full border border-ink/10 px-3 py-1 text-xs text-ink/60">
+                      Confidence {Math.round(record.confidence * 100)}%
+                    </div>
                   </div>
-                  <div className="rounded-full border border-ink/10 px-3 py-1 text-xs text-ink/60">
-                    Confidence {Math.round(record.confidence * 100)}%
+                  <div className="grid gap-3">
+                    <div className="text-sm text-ink/60">
+                      Suggested: {record.suggestedCategory ?? "Needs manual coding"}
+                    </div>
+                    <select
+                      className="rounded-2xl border border-ink/10 bg-white px-4 py-3 text-sm outline-none transition focus:border-clay"
+                      onChange={(event) =>
+                        setSession((current) => ({
+                          ...current,
+                          codingRecords: current.codingRecords.map((item, itemIndex) =>
+                            itemIndex === index
+                              ? {
+                                  ...item,
+                                  finalCategory: event.target.value
+                                    ? (event.target.value as (typeof CODING_CATEGORIES)[number])
+                                    : null,
+                                }
+                              : item,
+                          ),
+                        }))
+                      }
+                      value={record.finalCategory ?? ""}
+                    >
+                      <option value="">Use suggested category</option>
+                      {CODING_CATEGORIES.map((category) => (
+                        <option key={category} value={category}>
+                          {category}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-sm leading-6 text-ink/70">{record.rationale}</p>
                   </div>
                 </div>
-                <div className="grid gap-3">
-                  <div className="text-sm text-ink/60">
-                    Suggested: {record.suggestedCategory ?? "Needs manual coding"}
-                  </div>
-                  <select
-                    className="rounded-2xl border border-ink/10 bg-white px-4 py-3 text-sm outline-none transition focus:border-clay"
-                    onChange={(event) =>
-                      setSession((current) => ({
-                        ...current,
-                        codingRecords: current.codingRecords.map((item, itemIndex) =>
-                          itemIndex === index
-                            ? {
-                                ...item,
-                                finalCategory: event.target.value
-                                  ? (event.target.value as (typeof CODING_CATEGORIES)[number])
-                                  : null,
-                              }
-                            : item,
-                        ),
-                      }))
-                    }
-                    value={record.finalCategory ?? ""}
-                  >
-                    <option value="">Use suggested category</option>
-                    {CODING_CATEGORIES.map((category) => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-sm leading-6 text-ink/70">{record.rationale}</p>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="card-surface rounded-[2rem] border border-white/60 p-6 shadow-card">

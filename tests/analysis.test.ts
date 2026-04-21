@@ -103,6 +103,8 @@ function createSession(overrides: Partial<InterviewSession> = {}): InterviewSess
       },
     ],
     followUpReasons: [],
+    analysisSummary: null,
+    analysisGeneratedAt: null,
     ...overrides,
   };
 }

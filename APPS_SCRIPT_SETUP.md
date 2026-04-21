@@ -2,7 +2,7 @@
 
 This repo supports using a Google Sheet through a bound Google Apps Script web app, without Google Cloud service accounts.
 
-This version uses **atomic row-level session writes** for the live interview flow:
+This version keeps the participant's in-progress interview state in the browser and uses **atomic row-level session writes** only when a session is submitted or later enriched with AI analysis:
 
 - one session row is upserted by `sessionId`
 - transcript rows are replaced only for that `sessionId`
@@ -75,6 +75,8 @@ const SESSION_HEADERS = [
   "parserConfidence",
   "parserWarnings",
   "followUpReasons",
+  "analysisSummary",
+  "analysisGeneratedAt",
 ];
 
 const TRANSCRIPT_HEADERS = [
@@ -338,6 +340,8 @@ function parseSessionRow_(row) {
     participantKey: null,
     codingRecords: [],
     followUpReasons: JSON.parse(row.followUpReasons || "[]"),
+    analysisSummary: row.analysisSummary || null,
+    analysisGeneratedAt: row.analysisGeneratedAt || null,
   };
 }
 
@@ -567,6 +571,8 @@ function upsertSessionLocked_(session) {
       session.parserConfidence == null ? "" : String(session.parserConfidence),
     parserWarnings: JSON.stringify(session.parserWarnings || []),
     followUpReasons: JSON.stringify(session.followUpReasons || []),
+    analysisSummary: session.analysisSummary || "",
+    analysisGeneratedAt: session.analysisGeneratedAt || "",
   });
 
   replaceRowsByField_(

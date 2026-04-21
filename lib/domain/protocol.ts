@@ -1,8 +1,8 @@
 export const STUDY_GROUP = "Latinos";
 
 export const INTRODUCTION_TEXT = [
-  "No one's name will be used in the research, but email addresses are collected in case we have follow-up questions based on the results.",
   "This is a study on identity conducted by graduate students at the University of Pennsylvania as part of a research assignment.",
+  "No one's name will be used in the research, but email addresses are collected in case we have follow-up questions based on the results.",
   "Whether the results will be published depends on the findings.",
   "Participants will not be personally identified, and there are approximately 3,000 people in the study initially.",
 ];
@@ -28,7 +28,7 @@ export const INELIGIBLE_MESSAGE =
   "Thank you for your time. This study is limited to participants who self-identify as Latino, so this interview will not continue.";
 
 export const ENGLISH_PROMPTS = {
-  intro: INTRODUCTION_TEXT.join(" "),
+  intro: INTRODUCTION_TEXT.join("\n\n"),
   eligibility: "Do you identify yourself as a Latino?",
   identityQuestion: APPROVED_IDENTITY_QUESTION,
   clarification: APPROVED_CLARIFICATION,
@@ -49,7 +49,7 @@ export const ENGLISH_PROMPTS = {
 
 export const SPANISH_PROMPTS = {
   intro:
-    "Ningún nombre se usará en la investigación, pero se recopilan direcciones de correo electrónico en caso de que tengamos preguntas de seguimiento basadas en los resultados. Este es un estudio sobre la identidad realizado por estudiantes de posgrado de la Universidad de Pennsylvania como parte de una tarea de investigación. Que los resultados se publiquen dependerá de los hallazgos. Los participantes no serán identificados personalmente y hay aproximadamente 3,000 personas en el estudio inicialmente.",
+    "Este es un estudio sobre la identidad realizado por estudiantes de posgrado de la Universidad de Pennsylvania como parte de una tarea de investigación.\n\nNingún nombre se usará en la investigación, pero se recopilan direcciones de correo electrónico en caso de que tengamos preguntas de seguimiento basadas en los resultados.\n\nQue los resultados se publiquen dependerá de los hallazgos.\n\nLos participantes no serán identificados personalmente y hay aproximadamente 3,000 personas en el estudio inicialmente.",
   eligibility: "¿Se identifica usted como latino/a?",
   identityQuestion:
     "¿De dónde obtiene su identidad? Por favor enumere cinco fuentes, de la más importante a la menos importante.",

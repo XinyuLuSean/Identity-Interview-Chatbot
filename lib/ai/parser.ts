@@ -3,7 +3,12 @@ import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 
 import { CODING_CATEGORIES } from "@/lib/domain/protocol";
-import type { CodingCategory, CodingRecord, RankedSource } from "@/lib/domain/schemas";
+import type {
+  CodingCategory,
+  CodingRecord,
+  InterviewSession,
+  RankedSource,
+} from "@/lib/domain/schemas";
 
 const aiRankingSchema = z.object({
   rankedSources: z.array(z.string().min(1)).length(5),
@@ -20,6 +25,11 @@ const aiCodingSchema = z.object({
       rationale: z.string().min(1),
     }),
   ),
+});
+
+const aiSessionAnalysisSchema = z.object({
+  summary: z.string().min(1),
+  records: aiCodingSchema.shape.records,
 });
 
 export type ParsedRankingResult = {
@@ -147,6 +157,41 @@ async function suggestCodingWithModel(
   }
 }
 
+function buildCodingRecordsFromModel(
+  subjectId: string,
+  sources: RankedSource[],
+  modelRecords: Omit<CodingRecord, "subjectId" | "rawSourceText" | "followUpNeeded" | "finalCategory">[],
+): CodingRecord[] {
+  return sources.map((source, index) => ({
+    subjectId,
+    rank: source.rank,
+    rawSourceText: source.text,
+    suggestedCategory: modelRecords[index]?.suggestedCategory ?? null,
+    finalCategory: null,
+    confidence: modelRecords[index]?.confidence ?? 0.5,
+    rationale:
+      modelRecords[index]?.rationale ??
+      "AI suggestion unavailable; researcher review is needed.",
+    followUpNeeded: (modelRecords[index]?.confidence ?? 0.5) < 0.6,
+  }));
+}
+
+function buildHeuristicCodingRecords(subjectId: string, sources: RankedSource[]): CodingRecord[] {
+  return sources.map((source) => {
+    const heuristic = heuristicCategoryForSource(source.text);
+    return {
+      subjectId,
+      rank: source.rank,
+      rawSourceText: source.text,
+      suggestedCategory: heuristic.category,
+      finalCategory: null,
+      confidence: heuristic.confidence,
+      rationale: heuristic.rationale,
+      followUpNeeded: heuristic.confidence < 0.6,
+    };
+  });
+}
+
 function heuristicCategoryForSource(text: string): {
   category: CodingCategory | null;
   confidence: number;
@@ -181,31 +226,60 @@ export async function suggestCodingRecords(
   const modelRecords = await suggestCodingWithModel(sources);
 
   if (modelRecords) {
-    return sources.map((source, index) => ({
-      subjectId,
-      rank: source.rank,
-      rawSourceText: source.text,
-      suggestedCategory: modelRecords[index]?.suggestedCategory ?? null,
-      finalCategory: null,
-      confidence: modelRecords[index]?.confidence ?? 0.5,
-      rationale:
-        modelRecords[index]?.rationale ??
-        "AI suggestion unavailable; researcher review is needed.",
-      followUpNeeded: (modelRecords[index]?.confidence ?? 0.5) < 0.6,
-    }));
+    return buildCodingRecordsFromModel(subjectId, sources, modelRecords);
   }
 
-  return sources.map((source) => {
-    const heuristic = heuristicCategoryForSource(source.text);
-    return {
-      subjectId,
-      rank: source.rank,
-      rawSourceText: source.text,
-      suggestedCategory: heuristic.category,
-      finalCategory: null,
-      confidence: heuristic.confidence,
-      rationale: heuristic.rationale,
-      followUpNeeded: heuristic.confidence < 0.6,
-    };
-  });
+  return buildHeuristicCodingRecords(subjectId, sources);
+}
+
+export async function generateSessionAnalysis(
+  session: Pick<
+    InterviewSession,
+    "subjectId" | "identityResponse" | "rankedSourcesDraft" | "languageCode"
+  >,
+): Promise<{ codingRecords: CodingRecord[]; summary: string }> {
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      const response = await generateObject({
+        model: openai("gpt-4.1-mini"),
+        schema: aiSessionAnalysisSchema,
+        prompt: [
+          "You are assisting a graduate-level identity interview study.",
+          "Produce two outputs in one response:",
+          "1. One advisory category suggestion for each ranked identity source.",
+          "2. A concise researcher-facing summary describing the participant's overall identity pattern.",
+          "Allowed categories: Family, Friends, Occupation, Personality, Hobbies, Stereotype.",
+          "Do not invent additional sources or categories.",
+          `Interview language: ${session.languageCode}`,
+          `Identity response: ${session.identityResponse ?? "Not provided."}`,
+          `Ranked sources: ${JSON.stringify(session.rankedSourcesDraft)}`,
+        ].join("\n\n"),
+      });
+
+      return {
+        codingRecords: buildCodingRecordsFromModel(
+          session.subjectId,
+          session.rankedSourcesDraft,
+          response.object.records,
+        ),
+        summary: response.object.summary,
+      };
+    } catch {
+      // Fall through to a deterministic local summary.
+    }
+  }
+
+  const codingRecords = buildHeuristicCodingRecords(session.subjectId, session.rankedSourcesDraft);
+  const topSource = session.rankedSourcesDraft[0]?.text ?? "an unspecified source";
+  const categories = Array.from(
+    new Set(codingRecords.map((record) => record.suggestedCategory).filter(Boolean)),
+  ).join(", ");
+
+  return {
+    codingRecords,
+    summary:
+      `The participant's identity response centers first on ${topSource}. ` +
+      `Heuristic review suggests the ranked sources map mainly to ${categories || "unclear categories"}, ` +
+      "so researcher confirmation is recommended before final interpretation.",
+  };
 }
